@@ -3,150 +3,298 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LifeTracker | codeguy0425</title>
+    <title>PokeTracker AI | Trainer codeguy0425</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
+        .pokemon-font { font-family: 'Press Start 2P', cursive; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        body { -webkit-tap-highlight-color: transparent; }
+        @keyframes poke-shake {
+            0% { transform: translate(0, 0) rotate(0); }
+            20% { transform: translate(-2px, 0) rotate(-5deg); }
+            40% { transform: translate(2px, 0) rotate(5deg); }
+            60% { transform: translate(-2px, 0) rotate(-5deg); }
+            80% { transform: translate(2px, 0) rotate(5deg); }
+            100% { transform: translate(0, 0) rotate(0); }
+        }
+        .catching { animation: poke-shake 0.5s infinite; }
+        .pokedex-bg {
+            background: linear-gradient(180deg, #ee1515 0%, #ee1515 48%, #222224 48%, #222224 52%, #f0f0f0 52%, #f0f0f0 100%);
+        }
+        .pokeball-button {
+            position: relative;
+            overflow: hidden;
+        }
+        .pokeball-button::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border: 4px solid #222;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
     </style>
 </head>
-<body class="bg-[#f8fafc] text-slate-900 font-sans">
+<body class="bg-[#f0f0f0] text-slate-900 font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useCallback } = React;
+        const apiKey = ""; // Provided by environment
 
         function App() {
-            // Persistence via LocalStorage
+            const [view, setView] = useState('tracker'); 
             const [logs, setLogs] = useState(() => {
-                const saved = localStorage.getItem('lifetracker_db');
-                return saved ? JSON.parse(saved) : [];
+                try {
+                    return JSON.parse(localStorage.getItem('lifetracker_db') || '[]');
+                } catch(e) { return []; }
             });
-            const [text, setText] = useState("");
-            const [category, setCategory] = useState("Note");
+            const [prompt, setPrompt] = useState("");
+            const [isBuilding, setIsBuilding] = useState(false);
+            const [pushStatus, setPushStatus] = useState('idle');
+            const [testStatus, setTestStatus] = useState(null);
+            const [commits, setCommits] = useState([]);
+            const [debugInfo, setDebugInfo] = useState(""); 
+            
+            const [ghToken, setGhToken] = useState(localStorage.getItem('gh_token') || "");
+            const repo = "lifetracker";
+            const owner = "codeguy0425";
+            const filePath = "index.html"; 
 
             useEffect(() => {
                 localStorage.setItem('lifetracker_db', JSON.stringify(logs));
             }, [logs]);
 
-            const categories = [
-                { name: 'Note', color: 'bg-slate-500', icon: '📝' },
-                { name: 'Meal', color: 'bg-orange-500', icon: '🍲' },
-                { name: 'Gym', color: 'bg-blue-600', icon: '💪' },
-                { name: 'Hiking', color: 'bg-green-600', icon: '⛰️' },
-                { name: 'PTCG', color: 'bg-red-500', icon: '🃏' }
-            ];
+            const fetchCommits = useCallback(async () => {
+                if (!ghToken) return;
+                try {
+                    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=8`, {
+                        headers: { 
+                            "Authorization": `token ${ghToken}`,
+                            "Accept": "application/vnd.github.v3+json"
+                        }
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setCommits(data);
+                    }
+                } catch (e) { 
+                    console.error("Commit fetch error:", e); 
+                }
+            }, [ghToken, owner, repo]);
 
-            const handleSave = () => {
-                if (!text.trim()) return;
-                const newEntry = {
-                    id: Date.now(),
-                    category,
-                    content: text,
-                    date: new Date().toLocaleString('en-HK', { 
-                        month: 'short', 
-                        day: 'numeric', 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                    })
-                };
-                setLogs([newEntry, ...logs]);
-                setText("");
-            };
-
-            const deleteLog = (id) => {
-                if(window.confirm("Delete this log?")) {
-                    setLogs(logs.filter(l => l.id !== id));
+            const testConnection = async () => {
+                if (!ghToken) {
+                    setTestStatus("❌ No Badge");
+                    return;
+                }
+                setTestStatus("Searching...");
+                try {
+                    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+                        headers: { "Authorization": `token ${ghToken}` }
+                    });
+                    if (res.ok) {
+                        setTestStatus("✅ Gym Link OK");
+                        fetchCommits();
+                    } else {
+                        const err = await res.json();
+                        setTestStatus(`❌ Error: ${err.message}`);
+                    }
+                } catch (e) {
+                    setTestStatus("❌ Connection Lost");
                 }
             };
 
-            const exportData = () => {
-                const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `lifetracker_export_${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
+            useEffect(() => { 
+                if (view === 'admin') {
+                    testConnection();
+                    fetchCommits();
+                }
+            }, [view, fetchCommits]);
+
+            const handleAIUpdate = async () => {
+                if (!ghToken) return alert("Trainer! You need a GitHub Token Badge in settings.");
+                setIsBuilding(true);
+                setPushStatus('idle');
+                setDebugInfo("Professor thinking...");
+
+                try {
+                    const currentCode = document.documentElement.outerHTML;
+                    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                    
+                    const aiResponse = await fetch(geminiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: `Update this HTML: ${prompt}. Use a Pokemon theme for the UI. Return ONLY the full code starting with <!DOCTYPE html>. No explanations. \n\n ${currentCode}` }] }]
+                        })
+                    });
+
+                    const aiData = await aiResponse.json();
+                    let updatedHtml = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!updatedHtml) throw new Error("Evolution failed: empty DNA");
+                    
+                    updatedHtml = updatedHtml.replace(/^```html\n?/, '').replace(/\n?```$/, '').trim();
+
+                    setDebugInfo("Analyzing Species DNA...");
+                    const githubUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+                    const fileMeta = await fetch(githubUrl, { headers: { Authorization: `token ${ghToken}` } });
+                    
+                    if (!fileMeta.ok) {
+                        const err = await fileMeta.json();
+                        throw new Error(`Pokedex lookup failed: ${err.message}`);
+                    }
+                    const metaData = await fileMeta.json();
+
+                    setDebugInfo("Initiating Mega Evolution...");
+                    const commitResponse = await fetch(githubUrl, {
+                        method: 'PUT',
+                        headers: { "Authorization": `token ${ghToken}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            message: `✨ Evolution: ${prompt.slice(0, 40)}`,
+                            content: btoa(unescape(encodeURIComponent(updatedHtml))),
+                            sha: metaData.sha
+                        })
+                    });
+
+                    if (commitResponse.ok) {
+                        setPushStatus('success');
+                        setDebugInfo("Evolution Complete! Returning to PC...");
+                        await fetchCommits(); 
+                        setTimeout(() => window.location.reload(), 1500);
+                    } else {
+                        const err = await commitResponse.json();
+                        throw new Error(err.message || "Evolution Rejected");
+                    }
+                } catch (err) { 
+                    setPushStatus('error');
+                    setDebugInfo(`Fainted: ${err.message}`);
+                    console.error(err);
+                } finally { 
+                    setIsBuilding(false); 
+                }
             };
 
             return (
-                <div className="max-w-md mx-auto min-h-screen flex flex-col p-4 pb-10">
-                    <header className="flex justify-between items-center py-6">
-                        <div>
-                            <h1 className="text-3xl font-black tracking-tighter text-slate-900">LifeTracker</h1>
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">New Chapter • HK</p>
+                <div className="max-w-md mx-auto min-h-screen flex flex-col p-5 bg-[#f0f0f0]">
+                    <nav className="flex justify-between items-center mb-8 bg-[#ffde00] p-4 rounded-3xl border-4 border-[#3b4cca] shadow-[4px_4px_0px_#3b4cca]">
+                        <div onClick={() => setView('tracker')} className="cursor-pointer group">
+                            <h1 className="text-xl font-black italic tracking-tighter text-[#3b4cca] group-active:text-red-600 transition-colors pokemon-font text-[12px]">
+                                POKE<span className="text-red-600">TRACKER</span>
+                            </h1>
+                            <p className="text-[8px] font-bold text-[#3b4cca] uppercase tracking-widest leading-none mt-1">AI Pokedex System</p>
                         </div>
-                        <button onClick={exportData} className="bg-white p-2 rounded-full shadow-sm border border-slate-200 active:scale-90 transition-transform">
-                            💾
+                        <button onClick={() => setView(v => v === 'tracker' ? 'admin' : 'tracker')} className="w-12 h-12 flex items-center justify-center rounded-full bg-white border-4 border-[#222] shadow-md active:scale-90 transition-all text-xl pokeball-button">
+                            {view === 'tracker' ? '' : ''}
                         </button>
-                    </header>
+                    </nav>
 
-                    {/* Input Module */}
-                    <div className="bg-white rounded-3xl p-5 shadow-xl shadow-slate-200/50 border border-slate-100 mb-8">
-                        <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar py-1">
-                            {categories.map(cat => (
+                    {view === 'tracker' ? (
+                        <div className="space-y-6 flex-1 animate-in slide-in-from-right-4 duration-300">
+                            <div className={`p-6 rounded-3xl border-4 transition-all duration-500 ${isBuilding ? 'bg-red-50 border-red-500 catching' : 'bg-white border-[#3b4cca] shadow-[6px_6px_0px_#3b4cca]'} relative`}>
+                                <h3 className={`text-[10px] pokemon-font mb-4 ${isBuilding ? 'text-red-600' : 'text-[#3b4cca]'}`}>
+                                    {isBuilding ? 'EVOLVING...' : 'NEW EVOLUTION'}
+                                </h3>
+                                <textarea 
+                                    className="w-full p-4 rounded-2xl text-sm bg-slate-50 text-slate-900 border-2 border-slate-200 outline-none mb-4 resize-none focus:border-[#ffde00]"
+                                    rows="3"
+                                    placeholder="Describe the next evolution..."
+                                    value={prompt}
+                                    onChange={e => setPrompt(e.target.value)}
+                                    disabled={isBuilding}
+                                />
                                 <button 
-                                    key={cat.name} 
-                                    onClick={() => setCategory(cat.name)}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-sm font-bold whitespace-nowrap transition-all ${
-                                        category === cat.name 
-                                        ? `${cat.color} text-white shadow-lg scale-105` 
-                                        : 'bg-slate-50 text-slate-500 border border-slate-100'
-                                    }`}
+                                    onClick={handleAIUpdate} 
+                                    disabled={isBuilding || !prompt}
+                                    className={`w-full py-4 rounded-2xl font-black text-sm text-white shadow-lg active:scale-95 transition-all pokemon-font text-[10px]
+                                        ${pushStatus === 'success' ? 'bg-green-500' : pushStatus === 'error' ? 'bg-red-600' : 'bg-[#3b4cca]'}
+                                        ${(isBuilding || !prompt) ? 'opacity-50 cursor-not-allowed' : ''}
+                                    `}
                                 >
-                                    <span>{cat.icon}</span>
-                                    {cat.name}
+                                    {isBuilding ? 'CATCHING...' : pushStatus === 'success' ? 'CAUGHT!' : pushStatus === 'error' ? 'MISSED!' : 'EVOLVE & PUSH'}
                                 </button>
-                            ))}
-                        </div>
-                        
-                        <textarea 
-                            className="w-full bg-slate-50 p-4 rounded-2xl text-slate-800 placeholder-slate-400 border-none focus:ring-2 focus:ring-slate-100 outline-none resize-none transition-all"
-                            placeholder={`Describe your ${category.toLowerCase()}...`}
-                            rows="4"
-                            value={text}
-                            onChange={(e) => setText(e.target.value)}
-                        />
-                        
-                        <button 
-                            onClick={handleSave}
-                            className="w-full mt-4 bg-slate-900 text-white py-4 rounded-2xl font-black text-lg active:scale-[0.98] transition-all shadow-lg shadow-slate-900/20"
-                        >
-                            Log Activity
-                        </button>
-                    </div>
-
-                    {/* Feed Section */}
-                    <div className="space-y-4">
-                        <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest px-2">Timeline</h2>
-                        {logs.length === 0 && (
-                            <div className="text-center py-20 bg-slate-100/50 rounded-3xl border-2 border-dashed border-slate-200">
-                                <p className="text-slate-400 font-medium italic text-sm">Waiting for your first entry...</p>
+                                {debugInfo && pushStatus === 'error' && (
+                                    <p className="mt-3 text-[9px] text-red-600 font-mono text-center truncate italic">{debugInfo}</p>
+                                )}
                             </div>
-                        )}
-                        {logs.map(log => (
-                            <div key={log.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative group animate-in slide-in-from-bottom-4 duration-300">
-                                <div className="flex justify-between items-center mb-3">
-                                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black text-white ${categories.find(c => c.name === log.category)?.color}`}>
-                                        <span>{categories.find(c => c.name === log.category)?.icon}</span>
-                                        {log.category}
-                                    </div>
-                                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">{log.date}</span>
+                            
+                            <div className="space-y-4">
+                                <h2 className="text-[10px] pokemon-font text-[#3b4cca] px-2 uppercase">Trainer Logs</h2>
+                                {logs.length === 0 ? (
+                                    <div className="text-center py-12 text-slate-400 italic text-sm bg-white rounded-3xl border-2 border-dashed border-slate-200">No wild data encountered yet.</div>
+                                ) : (
+                                    logs.map(log => (
+                                        <div key={log.id} className="bg-white p-5 rounded-3xl border-2 border-[#3b4cca] shadow-[3px_3px_0px_#3b4cca]">
+                                            <p className="text-sm text-slate-700 leading-relaxed font-medium">{log.content}</p>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-6 animate-in slide-in-from-left-4 duration-300">
+                            <div className="bg-white p-6 rounded-3xl border-4 border-[#ee1515] shadow-[6px_6px_0px_#222]">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-sm pokemon-font text-[#ee1515]">PC CONFIG</h2>
+                                    {testStatus && <span className="text-[8px] font-bold px-2 py-1 bg-slate-100 rounded-lg border border-slate-200">{testStatus}</span>}
                                 </div>
-                                <p className="text-slate-700 font-medium leading-relaxed whitespace-pre-wrap">{log.content}</p>
+                                
+                                <label className="text-[10px] font-bold uppercase text-slate-500 block mb-2">Trainer Token (GitHub)</label>
+                                <input 
+                                    type="password" 
+                                    className="w-full p-4 bg-slate-50 rounded-2xl text-sm border-2 border-slate-100 mb-4 outline-none focus:border-[#3b4cca]" 
+                                    placeholder="ghp_..."
+                                    value={ghToken} 
+                                    onChange={e => {setGhToken(e.target.value); localStorage.setItem('gh_token', e.target.value)}} 
+                                />
+
                                 <button 
-                                    onClick={() => deleteLog(log.id)}
-                                    className="absolute -top-2 -right-2 bg-white border border-slate-200 text-slate-300 hover:text-red-500 w-7 h-7 rounded-full shadow-sm flex items-center justify-center text-sm font-bold"
+                                    onClick={testConnection}
+                                    className="w-full py-3 mb-4 rounded-xl text-[9px] pokemon-font border-4 border-[#3b4cca] bg-white hover:bg-[#3b4cca] hover:text-white transition-all"
                                 >
-                                    ×
+                                    Check Gym Status
                                 </button>
+
+                                <div className="p-4 bg-[#222] rounded-2xl text-[9px] font-mono text-green-400 break-all border-4 border-[#555]">
+                                    <p className="text-[#888] mb-1 uppercase font-bold">System Output</p>
+                                    {debugInfo || "Waiting for command..."}
+                                </div>
                             </div>
-                        ))}
-                    </div>
+
+                            <div className="bg-white p-6 rounded-3xl border-4 border-[#3b4cca]">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-[9px] pokemon-font text-slate-400">EVOLUTION TREE</h3>
+                                    <button onClick={fetchCommits} className="text-[9px] text-[#3b4cca] font-bold uppercase underline">Refresh</button>
+                                </div>
+                                <div className="space-y-3">
+                                    {commits.length > 0 ? commits.map((c, i) => (
+                                        <div key={i} className="flex flex-col border-b border-slate-100 pb-3 last:border-0">
+                                            <div className="flex justify-between mb-1">
+                                                <span className="text-[10px] font-mono text-red-600 font-bold bg-red-50 px-2 rounded-full border border-red-100">{c.sha.slice(0,7)}</span>
+                                                <span className="text-[9px] text-slate-400 uppercase font-bold">{new Date(c.commit.author.date).toLocaleDateString()}</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-700 truncate font-bold">» {c.commit.message}</p>
+                                        </div>
+                                    )) : (
+                                        <p className="text-[10px] text-slate-400 italic">No species discovered.</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <footer className="mt-8 text-center">
+                        <div className="inline-block px-4 py-1 rounded-full border-2 border-slate-200 text-[8px] text-slate-400 uppercase font-black tracking-widest">
+                            PokeTracker v2.0 • Kanto Region
+                        </div>
+                    </footer>
                 </div>
             );
         }
