@@ -2,370 +2,405 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LifeTracker - Green Edition</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Life Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8faf9;
+            color: #064e3b;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(16, 185, 129, 0.1);
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        
+        .modal-animate { animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        input, textarea, button {
+            font-size: 16px !important;
+        }
     </style>
 </head>
-<body class="bg-emerald-50 text-emerald-950">
+<body class="safe-area-inset-bottom">
     <div id="root"></div>
+
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide && iconRef.current) {
+                    window.lucide.createIcons();
+                }
+            }, [name, size, className]);
+            return <i ref={iconRef} data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const STORAGE_KEY = 'lifetracker-v4-data';
+        const CAT_STORAGE_KEY = 'lifetracker-v4-cats';
         const DAY_ONE = new Date('2026-04-23T00:00:00');
-        const STORAGE_KEY = 'greentracker-life-data-v2';
+
+        const DEFAULT_CATEGORIES = [
+            { name: 'Meal', icon: 'utensils', color: 'bg-orange-500' },
+            { name: 'Gym', icon: 'dumbbell', color: 'bg-emerald-600' },
+            { name: 'Hiking', icon: 'mountain', color: 'bg-green-700' },
+            { name: 'PTCG', icon: 'zap', color: 'bg-teal-500' },
+            { name: 'Note', icon: 'sticky-note', color: 'bg-slate-500' }
+        ];
+
+        const CAT_COLORS = [
+            'bg-emerald-600', 'bg-teal-600', 'bg-rose-500', 'bg-indigo-500', 
+            'bg-amber-500', 'bg-violet-500', 'bg-sky-500', 'bg-fuchsia-500'
+        ];
 
         function App() {
             const [logs, setLogs] = useState(() => {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                return saved ? JSON.parse(saved) : [];
+                try {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    return saved ? JSON.parse(saved) : [];
+                } catch (e) { return []; }
             });
-            const [text, setText] = useState("");
-            const [category, setCategory] = useState("Note");
-            const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+            const [categories, setCategories] = useState(() => {
+                try {
+                    const saved = localStorage.getItem(CAT_STORAGE_KEY);
+                    return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+                } catch (e) { return DEFAULT_CATEGORIES; }
+            });
             
-            // UI State
-            const [viewMode, setViewMode] = useState('timeline'); // 'timeline' or 'calendar'
+            const [viewMode, setViewMode] = useState('timeline');
+            const [isEntryOpen, setIsEntryOpen] = useState(false);
+            const [isAddingCat, setIsAddingCat] = useState(false);
             const [filterCategory, setFilterCategory] = useState('All');
-            const [calendarMonth, setCalendarMonth] = useState(new Date());
             const [inspectDate, setInspectDate] = useState(null);
             
-            const fileInputRef = useRef(null);
+            const [editingLog, setEditingLog] = useState(null);
+            const [formText, setFormText] = useState("");
+            const [formCategory, setFormCategory] = useState("Note");
+            
+            const todayStr = useMemo(() => {
+                const now = new Date();
+                return new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+            }, []);
+
+            const [formDate, setFormDate] = useState(todayStr);
+            const [newCatName, setNewCatName] = useState("");
+            const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+            const [currentCalMonth, setCurrentCalMonth] = useState(new Date().getMonth());
+            const [currentCalYear, setCurrentCalYear] = useState(new Date().getFullYear());
 
             useEffect(() => {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
-            }, [logs]);
+                localStorage.setItem(CAT_STORAGE_KEY, JSON.stringify(categories));
+                if (window.lucide) window.lucide.createIcons();
+            }, [logs, categories]);
 
-            const getDayNumber = (dateString) => {
-                const target = new Date(dateString);
+            const getDayNumber = (dateStr) => {
+                const target = new Date(dateStr);
                 target.setHours(0,0,0,0);
-                const diffTime = target - DAY_ONE;
-                return Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                const start = new Date(DAY_ONE);
+                start.setHours(0,0,0,0);
+                const diff = Math.floor((target - start) / (1000 * 60 * 60 * 24)) + 1;
+                return diff;
             };
 
-            const currentDayNumber = useMemo(() => {
-                const today = new Date();
-                today.setHours(0,0,0,0);
-                return getDayNumber(today.toISOString().split('T')[0]);
-            }, []);
-
-            const categories = [
-                { name: 'Meal', color: 'bg-lime-500' },
-                { name: 'Gym', color: 'bg-emerald-600' },
-                { name: 'Hiking', color: 'bg-green-700' },
-                { name: 'PTCG', color: 'bg-teal-500' },
-                { name: 'Note', color: 'bg-slate-500' }
-            ];
-
             const filteredLogs = useMemo(() => {
-                return logs.filter(log => filterCategory === 'All' || log.category === filterCategory);
+                let list = [...logs];
+                if (filterCategory !== 'All') {
+                    list = list.filter(l => l.category === filterCategory);
+                }
+                return list.sort((a, b) => new Date(b.date) - new Date(a.date));
             }, [logs, filterCategory]);
 
             const groupedLogs = useMemo(() => {
                 const groups = {};
                 filteredLogs.forEach(log => {
-                    const dateKey = log.isoDate;
-                    if (!groups[dateKey]) groups[dateKey] = [];
-                    groups[dateKey].push(log);
+                    if (!groups[log.date]) groups[log.date] = [];
+                    groups[log.date].push(log);
                 });
                 return Object.entries(groups).sort((a, b) => new Date(b[0]) - new Date(a[0]));
             }, [filteredLogs]);
 
-            const saveEntry = () => {
-                if (!text) return;
-                const entryDate = new Date(selectedDate);
-                const entry = {
-                    id: Date.now(),
-                    category,
-                    content: text,
-                    displayDate: entryDate.toLocaleDateString('en-HK', { day: '2-digit', month: 'short', year: 'numeric' }),
-                    isoDate: selectedDate,
-                    dayNumber: getDayNumber(selectedDate)
+            const calendarDays = useMemo(() => {
+                const start = new Date(currentCalYear, currentCalMonth, 1);
+                const end = new Date(currentCalYear, currentCalMonth + 1, 0);
+                const days = [];
+                const startDay = start.getDay(); 
+                for (let i = 0; i < startDay; i++) days.push(null);
+                for (let i = 1; i <= end.getDate(); i++) {
+                    const d = new Date(currentCalYear, currentCalMonth, i);
+                    const dStr = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+                    days.push({
+                        day: i, dateStr: dStr,
+                        hasLogs: logs.some(l => l.date === dStr),
+                        isToday: dStr === todayStr
+                    });
+                }
+                return days;
+            }, [currentCalMonth, currentCalYear, logs, todayStr]);
+
+            const handleSave = () => {
+                if (!formText.trim()) return;
+                const newLog = {
+                    id: editingLog ? editingLog.id : Date.now(),
+                    content: formText,
+                    category: formCategory,
+                    date: formDate,
+                    dayNumber: getDayNumber(formDate)
                 };
-                setLogs([entry, ...logs]);
-                setText("");
+                if (editingLog) {
+                    setLogs(prev => prev.map(l => l.id === editingLog.id ? newLog : l));
+                } else {
+                    setLogs(prev => [newLog, ...prev]);
+                }
+                closeForm();
             };
 
-            const deleteLog = (id) => {
-                setLogs(logs.filter(l => l.id !== id));
-            };
-
-            const exportData = () => {
-                const dataStr = JSON.stringify(logs, null, 2);
-                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-                const exportFileDefaultName = `lifetracker_backup_${new Date().toISOString().split('T')[0]}.json`;
-                const linkElement = document.createElement('a');
-                linkElement.setAttribute('href', dataUri);
-                linkElement.setAttribute('download', exportFileDefaultName);
-                linkElement.click();
-            };
-
-            const importData = (event) => {
-                const file = event.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const importedLogs = JSON.parse(e.target.result);
-                        if (Array.isArray(importedLogs)) {
-                            setLogs(importedLogs);
-                        }
-                    } catch (err) { alert("Error reading file."); }
-                };
-                reader.readAsText(file);
-                event.target.value = '';
-            };
-
-            const CalendarView = () => {
-                const year = calendarMonth.getFullYear();
-                const month = calendarMonth.getMonth();
-                const daysInMonth = new Date(year, month + 1, 0).getDate();
-                const firstDay = new Date(year, month, 1).getDay();
+            const addNewCategory = () => {
+                const trimmedName = newCatName.trim();
+                if (!trimmedName) return;
                 
-                const calendarDays = [];
-                for (let i = 0; i < firstDay; i++) calendarDays.push(null);
-                for (let i = 1; i <= daysInMonth; i++) calendarDays.push(i);
+                const exists = categories.find(c => c.name.toLowerCase() === trimmedName.toLowerCase());
+                if (exists) {
+                    setFormCategory(exists.name);
+                } else {
+                    const colorIndex = categories.length % CAT_COLORS.length;
+                    const newCat = { 
+                        name: trimmedName, 
+                        icon: 'hash', 
+                        color: CAT_COLORS[colorIndex] 
+                    };
+                    setCategories(prev => [...prev, newCat]);
+                    setFormCategory(trimmedName);
+                }
+                setNewCatName("");
+                setIsAddingCat(false);
+                // Ensure icons refresh after state update
+                setTimeout(() => window.lucide && window.lucide.createIcons(), 0);
+            };
 
-                return (
-                    <div className="space-y-4">
-                        <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-emerald-100">
-                            <div className="flex justify-between items-center mb-6 px-2">
-                                <button onClick={() => {
-                                    const d = new Date(calendarMonth);
-                                    d.setMonth(d.getMonth() - 1);
-                                    setCalendarMonth(d);
-                                }} className="p-2 hover:bg-emerald-50 rounded-full text-emerald-600">◀</button>
-                                <span className="font-black text-emerald-800 uppercase tracking-tighter text-lg">
-                                    {calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
-                                </span>
-                                <button onClick={() => {
-                                    const d = new Date(calendarMonth);
-                                    d.setMonth(d.getMonth() + 1);
-                                    setCalendarMonth(d);
-                                }} className="p-2 hover:bg-emerald-50 rounded-full text-emerald-600">▶</button>
-                            </div>
-                            <div className="grid grid-cols-7 gap-2">
-                                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
-                                    <div key={d} className="text-[10px] font-black text-center text-emerald-200 py-2">{d}</div>
-                                ))}
-                                {calendarDays.map((day, idx) => {
-                                    const dateStr = day ? `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
-                                    const dayLogs = logs.filter(l => l.isoDate === dateStr && (filterCategory === 'All' || l.category === filterCategory));
-                                    const hasLog = dayLogs.length > 0;
-                                    
-                                    return (
-                                        <button 
-                                            key={idx} 
-                                            disabled={!day}
-                                            onClick={() => setInspectDate(dateStr)}
-                                            className={`h-12 flex flex-col items-center justify-center text-sm rounded-2xl relative transition-all 
-                                                ${day ? 'hover:bg-emerald-50 active:scale-90 cursor-pointer' : 'opacity-0'} 
-                                                ${hasLog ? 'bg-emerald-100/50 text-emerald-800 font-bold border border-emerald-200' : 'text-emerald-300'}
-                                            `}
-                                        >
-                                            {day}
-                                            {hasLog && (
-                                                <div className="flex gap-0.5 mt-1">
-                                                    {dayLogs.slice(0, 3).map(l => (
-                                                        <div key={l.id} className={`w-1 h-1 rounded-full ${categories.find(c => c.name === l.category)?.color}`}></div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
+            const openEdit = (log) => {
+                setEditingLog(log);
+                setFormText(log.content);
+                setFormCategory(log.category);
+                setFormDate(log.date);
+                setIsEntryOpen(true);
+            };
 
-                        {inspectDate && (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-emerald-900/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setInspectDate(null)}>
-                                <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-6 overflow-hidden max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
-                                    <div className="flex justify-between items-center mb-4">
-                                        <h4 className="font-black text-emerald-800 uppercase text-xs tracking-widest">
-                                            Logs for {new Date(inspectDate).toLocaleDateString('en-HK', { day: '2-digit', month: 'short' })}
-                                        </h4>
-                                        <button onClick={() => setInspectDate(null)} className="text-emerald-300 hover:text-emerald-600 font-bold">Close</button>
-                                    </div>
-                                    <div className="overflow-y-auto space-y-3 pr-2 no-scrollbar">
-                                        {logs.filter(l => l.isoDate === inspectDate).map(log => (
-                                            <div key={log.id} className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
-                                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded text-white ${categories.find(c => c.name === log.category)?.color} mb-2 inline-block`}>
-                                                    {log.category}
-                                                </span>
-                                                <p className="text-sm text-emerald-900 leading-snug">{log.content}</p>
-                                            </div>
-                                        ))}
-                                        {logs.filter(l => l.isoDate === inspectDate).length === 0 && (
-                                            <p className="text-center py-10 text-emerald-300 italic text-sm">No data recorded.</p>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                );
+            const closeForm = () => {
+                setIsEntryOpen(false);
+                setEditingLog(null);
+                setFormText("");
+                setFormCategory("Note");
+                setIsAddingCat(false);
             };
 
             return (
-                <div className="max-w-md mx-auto min-h-screen p-4 flex flex-col gap-6 font-sans">
-                    <header className="pt-4">
-                        <div className="flex items-center justify-between mb-4">
-                            <div>
-                                <h1 className="text-2xl font-black text-emerald-600 tracking-tighter uppercase">Sector Log</h1>
-                                <p className="text-emerald-400 font-bold text-[10px] tracking-widest uppercase">System: Operational</p>
-                            </div>
-                            <div className="flex gap-1">
-                                {['timeline', 'calendar'].map(mode => (
-                                    <button 
-                                        key={mode}
-                                        onClick={() => setViewMode(mode)}
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === mode ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-emerald-400 border border-emerald-100'}`}
-                                    >
-                                        {mode}
-                                    </button>
-                                ))}
+                <div className="min-h-screen max-w-lg mx-auto pb-32">
+                    {deleteConfirm && (
+                        <div className="fixed inset-0 z-[300] flex items-center justify-center p-8 bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
+                            <div className="bg-white w-full rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-xl font-bold text-emerald-900 mb-6 text-center italic">Remove entry?</h3>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-4 bg-emerald-50 text-emerald-400 rounded-2xl flex items-center justify-center active:bg-emerald-100"><Icon name="x" size={24} /></button>
+                                    <button onClick={() => { setLogs(prev => prev.filter(l => l.id !== deleteConfirm)); setDeleteConfirm(null); }} className="flex-1 py-4 bg-red-500 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-95"><Icon name="trash-2" size={24} /></button>
+                                </div>
                             </div>
                         </div>
+                    )}
 
-                        <div className="bg-emerald-600 rounded-[2.5rem] p-6 text-white shadow-2xl shadow-emerald-200 relative overflow-hidden">
-                            <div className="relative z-10">
-                                <p className="text-xs font-black opacity-70 uppercase tracking-[0.2em] mb-1">Current Cycle</p>
-                                <p className="text-5xl font-black mb-1 tabular-nums">
-                                    {currentDayNumber > 0 ? `DAY ${currentDayNumber}` : 'INIT...'}
-                                </p>
+                    <div className={`fixed inset-0 z-[200] bg-black/40 transition-opacity duration-300 ${isEntryOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closeForm}>
+                        <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-[2.5rem] p-6 pb-10 shadow-2xl transition-transform duration-300 transform ${isEntryOpen ? 'translate-y-0' : 'translate-y-full'}`} onClick={e => e.stopPropagation()}>
+                            <div className="w-12 h-1.5 bg-emerald-100 rounded-full mx-auto mb-6"></div>
+                            <div className="flex justify-between items-center mb-6 px-2">
+                                <h2 className="text-2xl font-black text-emerald-900 tracking-tight">{editingLog ? <Icon name="edit-2" size={24} /> : <Icon name="pen-tool" size={24} />}</h2>
+                                <button onClick={closeForm} className="w-10 h-10 flex items-center justify-center bg-emerald-50 text-emerald-500 rounded-full"><Icon name="x" size={24} /></button>
                             </div>
-                            <div className="absolute -right-6 -top-6 w-32 h-32 bg-emerald-500 rounded-full blur-2xl opacity-50"></div>
+                            <div className="space-y-6">
+                                <div className="flex gap-3">
+                                    <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="flex-[2] bg-emerald-50/50 p-4 rounded-2xl text-emerald-800 font-bold border-none outline-none focus:ring-2 ring-emerald-500/20" />
+                                    <div className="flex-1 flex items-center justify-center bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest tabular-nums">D-{getDayNumber(formDate)}</div>
+                                </div>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center px-1">
+                                        <label className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">Category</label>
+                                        <button onClick={() => setIsAddingCat(!isAddingCat)} className={`w-8 h-8 flex items-center justify-center rounded-full active:opacity-50 transition-colors ${isAddingCat ? 'bg-emerald-900 text-white' : 'bg-emerald-50 text-emerald-600'}`}>
+                                            <Icon name={isAddingCat ? "minus" : "plus"} size={16}/>
+                                        </button>
+                                    </div>
+                                    {isAddingCat ? (
+                                        <div className="flex gap-2 modal-animate">
+                                            <input autoFocus type="text" placeholder="Category name..." className="flex-1 bg-emerald-50 border border-emerald-100 p-4 rounded-2xl text-base outline-none focus:ring-2 ring-emerald-500/20" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addNewCategory()} />
+                                            <button onClick={addNewCategory} className="w-14 h-14 bg-emerald-600 text-white rounded-2xl flex items-center justify-center active:scale-95 transition-transform"><Icon name="check" size={24} /></button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2 px-1">
+                                            {categories.map(cat => (
+                                                <button key={cat.name} onClick={() => setFormCategory(cat.name)} className={`flex flex-col items-center justify-center min-w-[80px] h-[80px] rounded-2xl transition-all ${formCategory === cat.name ? `${cat.color} text-white shadow-lg scale-105 ring-4 ring-emerald-50` : 'bg-emerald-50/50 text-emerald-400 border border-emerald-100/50'}`}>
+                                                    <Icon name={cat.icon || 'hash'} size={20} className="mb-1" />
+                                                    <span className="text-[10px] font-bold uppercase truncate w-full px-2 text-center">{cat.name}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <textarea value={formText} onChange={(e) => setFormText(e.target.value)} placeholder="..." className="w-full h-32 bg-emerald-50/30 border border-emerald-100 p-5 rounded-3xl outline-none focus:ring-2 ring-emerald-500/20 resize-none text-emerald-950 font-medium" />
+                                <button onClick={handleSave} className="w-full bg-emerald-600 text-white py-5 rounded-3xl flex items-center justify-center shadow-xl shadow-emerald-100 active:scale-95 transition-transform"><Icon name="check" size={28} /></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <header className="px-6 pt-10 pb-6">
+                        <div className="flex justify-between items-center mb-8">
+                            <h1 className="text-3xl font-black text-emerald-900 tracking-tighter">Life Tracker</h1>
+                            <button onClick={() => {
+                                const blob = new Blob([JSON.stringify(logs)], {type: 'application/json'});
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a'); a.href = url; a.download = 'life-tracker.json'; a.click();
+                            }} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-400 border border-emerald-50 shadow-sm"><Icon name="download" size={18} /></button>
+                        </div>
+                        <div className="bg-emerald-600 p-8 rounded-[2.5rem] shadow-2xl shadow-emerald-200/50 text-white flex justify-between items-center relative overflow-hidden">
+                            <div className="relative z-10">
+                                <p className="text-[10px] font-black uppercase opacity-60 tracking-[0.2em] mb-1 italic">Journey</p>
+                                <span className="text-6xl font-black tabular-nums tracking-tighter">{getDayNumber(todayStr)}</span>
+                            </div>
+                            <div className="w-16 h-16 bg-emerald-500/40 rounded-full flex items-center justify-center backdrop-blur-md relative z-10 border border-white/10"><Icon name="activity" size={28} /></div>
+                            <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-emerald-500 rounded-full blur-3xl opacity-40"></div>
                         </div>
                     </header>
 
-                    <main className="flex-1 space-y-6">
-                        {/* Filter Bar */}
-                        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                            {['All', ...categories.map(c => c.name)].map(cat => (
-                                <button 
-                                    key={cat}
-                                    onClick={() => setFilterCategory(cat)}
-                                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-2 ${filterCategory === cat ? 'bg-emerald-100 border-emerald-600 text-emerald-700' : 'bg-white border-transparent text-emerald-300'}`}
-                                >
-                                    {cat}
-                                </button>
+                    <div className="px-6 mb-4">
+                        <div className="flex gap-4 overflow-x-auto no-scrollbar py-2">
+                            <button onClick={() => setFilterCategory('All')} className={`w-12 h-12 min-w-[48px] rounded-full flex items-center justify-center transition-all border-2 ${filterCategory === 'All' ? 'bg-emerald-900 border-emerald-900 text-white shadow-lg' : 'bg-white border-emerald-50 text-emerald-300'}`}><Icon name="layers" size={18} /></button>
+                            {categories.map(cat => (
+                                <button key={cat.name} onClick={() => setFilterCategory(cat.name)} className={`w-12 h-12 min-w-[48px] rounded-full flex items-center justify-center transition-all border-2 ${filterCategory === cat.name ? 'bg-emerald-900 border-emerald-900 text-white shadow-lg' : 'bg-white border-emerald-50 text-emerald-300'}`}><Icon name={cat.icon || 'hash'} size={18} /></button>
                             ))}
                         </div>
+                    </div>
 
-                        {viewMode === 'calendar' ? (
-                            <CalendarView />
-                        ) : (
-                            <>
-                                {/* Entry Creator */}
-                                <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-emerald-50 space-y-4">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex-1 bg-emerald-50 p-3 rounded-2xl flex items-center justify-between px-4 border border-emerald-100 relative">
-                                            <input 
-                                                type="date" 
-                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                                value={selectedDate}
-                                                onChange={(e) => setSelectedDate(e.target.value)}
-                                            />
-                                            <div className="text-left pointer-events-none">
-                                                <p className="text-[10px] font-black text-emerald-300 uppercase tracking-tighter">Event Date</p>
-                                                <p className="text-sm font-black text-emerald-700">
-                                                    {new Date(selectedDate).toLocaleDateString('en-HK', { day: '2-digit', month: 'short' })}
-                                                </p>
-                                            </div>
-                                            <div className="w-8 h-8 bg-white rounded-xl flex items-center justify-center shadow-sm text-emerald-500 pointer-events-none text-xs">📅</div>
-                                        </div>
-                                        <div className="flex-1 bg-emerald-50 p-3 rounded-2xl px-4 border border-emerald-100">
-                                            <p className="text-[10px] font-black text-emerald-300 uppercase tracking-tighter">Timeline</p>
-                                            <p className="text-sm font-black text-emerald-700">Day {getDayNumber(selectedDate)}</p>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                                        {categories.map(cat => (
-                                            <button 
-                                                key={cat.name} 
-                                                onClick={() => setCategory(cat.name)}
-                                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${category === cat.name ? `${cat.color} text-white shadow-lg scale-105` : 'bg-emerald-50 text-emerald-400'}`}
-                                            >
-                                                {cat.name}
-                                            </button>
-                                        ))}
-                                    </div>
-
-                                    <textarea 
-                                        className="w-full p-4 bg-emerald-50/50 border-2 border-emerald-50 rounded-2xl focus:border-emerald-200 outline-none text-emerald-900 placeholder:text-emerald-200 resize-none text-sm font-medium"
-                                        placeholder="Add to logs..."
-                                        rows="2"
-                                        value={text}
-                                        onChange={(e) => setText(e.target.value)}
-                                    />
-
-                                    <button 
-                                        onClick={saveEntry}
-                                        className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-[0.2em] hover:bg-emerald-700 active:scale-95 transition-all shadow-xl shadow-emerald-100"
-                                    >
-                                        Transmit Log
-                                    </button>
-                                </div>
-
-                                {/* Grouped Timeline */}
-                                <div className="space-y-10 pb-10">
-                                    {groupedLogs.length === 0 && (
-                                        <div className="text-center py-20 opacity-20">
-                                            <div className="text-6xl mb-4">👽</div>
-                                            <p className="font-black uppercase tracking-widest text-xs">No matching logs</p>
-                                        </div>
-                                    )}
-                                    
-                                    {groupedLogs.map(([dateKey, entries]) => (
-                                        <section key={dateKey} className="relative">
-                                            <div className="sticky top-4 z-20 mb-4">
-                                                <div className="inline-flex items-center gap-3 bg-emerald-900 text-white px-4 py-2 rounded-full shadow-lg border-2 border-emerald-400">
-                                                    <span className="text-[10px] font-black uppercase tracking-tighter">
-                                                        {new Date(dateKey).toLocaleDateString('en-HK', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                    </span>
-                                                    <div className="w-px h-3 bg-emerald-500/50"></div>
-                                                    <span className="text-[10px] font-black">DAY {entries[0].dayNumber}</span>
+                    <main className="px-6 pb-20">
+                        {viewMode === 'timeline' ? (
+                            <div className="space-y-10">
+                                {groupedLogs.length > 0 ? (
+                                    groupedLogs.map(([date, items]) => (
+                                        <div key={date}>
+                                            <div className="flex items-center gap-4 mb-4">
+                                                <div className="bg-emerald-100/80 text-emerald-800 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest tabular-nums">
+                                                    {new Date(date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
                                                 </div>
+                                                <div className="h-px bg-emerald-50 flex-1"></div>
+                                                <div className="text-[10px] font-black text-emerald-300 uppercase tracking-tighter italic">D-{getDayNumber(date)}</div>
                                             </div>
-
-                                            <div className="space-y-3 ml-4 border-l-2 border-emerald-100 pl-6 py-2">
-                                                {entries.map(log => (
-                                                    <div key={log.id} className="bg-white p-5 rounded-3xl shadow-sm border border-emerald-50 relative group hover:border-emerald-200 transition-colors">
-                                                        <div className="flex justify-between items-center mb-3">
-                                                            <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg text-white tracking-widest ${categories.find(c => c.name === log.category)?.color}`}>
-                                                                {log.category}
-                                                            </span>
-                                                            <button 
-                                                                onClick={() => deleteLog(log.id)} 
-                                                                className="text-emerald-100 hover:text-red-400 transition-colors"
-                                                            >
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                            </button>
+                                            <div className="space-y-4">
+                                                {items.map(log => {
+                                                    const cat = categories.find(c => c.name === log.category);
+                                                    return (
+                                                        <div key={log.id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-emerald-50/50">
+                                                            <div className="flex justify-between items-center mb-3">
+                                                                <div className={`flex items-center gap-2 px-3 py-1 rounded-lg text-white ${cat?.color || 'bg-slate-400'}`}>
+                                                                    <Icon name={cat?.icon || 'hash'} size={10} />
+                                                                    <span className="text-[9px] font-black uppercase">{log.category}</span>
+                                                                </div>
+                                                                <div className="flex gap-4">
+                                                                    <button onClick={() => openEdit(log)} className="text-emerald-400"><Icon name="edit-2" size={16} /></button>
+                                                                    <button onClick={() => setDeleteConfirm(log.id)} className="text-emerald-100"><Icon name="trash-2" size={16} /></button>
+                                                                </div>
+                                                            </div>
+                                                            <p className="text-emerald-950 font-medium leading-relaxed text-sm whitespace-pre-wrap">{log.content}</p>
                                                         </div>
-                                                        <p className="text-emerald-900 text-sm leading-relaxed font-medium">{log.content}</p>
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
-                                        </section>
-                                    ))}
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="py-20 text-center flex flex-col items-center justify-center opacity-30 italic">
+                                        <Icon name="inbox" size={48} className="mb-4" />
+                                        <p className="text-sm font-bold uppercase tracking-widest">No entries found</p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-emerald-50">
+                                <div className="flex justify-between items-center mb-6">
+                                    <button onClick={() => { const d = new Date(currentCalYear, currentCalMonth - 1); setCurrentCalMonth(d.getMonth()); setCurrentCalYear(d.getFullYear()); }} className="p-2 text-emerald-400"><Icon name="chevron-left" size={20} /></button>
+                                    <h3 className="font-black text-emerald-900 uppercase text-xs tracking-widest tabular-nums">
+                                        {new Date(currentCalYear, currentCalMonth).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                                    </h3>
+                                    <button onClick={() => { const d = new Date(currentCalYear, currentCalMonth + 1); setCurrentCalMonth(d.getMonth()); setCurrentCalYear(d.getFullYear()); }} className="p-2 text-emerald-400"><Icon name="chevron-right" size={20} /></button>
                                 </div>
-                            </>
+                                <div className="grid grid-cols-7 gap-y-3">
+                                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => <div key={d} className="text-center text-[10px] font-black text-emerald-200">{d}</div>)}
+                                    {calendarDays.map((dayObj, i) => dayObj ? (
+                                        <button key={dayObj.dateStr} onClick={() => setInspectDate(dayObj.dateStr)} className={`aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-black transition-all ${dayObj.isToday ? 'ring-2 ring-amber-400' : ''} ${dayObj.hasLogs ? 'bg-emerald-100 text-emerald-900 border border-emerald-200' : 'text-emerald-200 hover:bg-emerald-50/50'}`}>
+                                            {dayObj.day}
+                                        </button>
+                                    ) : <div key={`empty-${i}`}></div>)}
+                                </div>
+                            </div>
                         )}
-
-                        {/* Data Control */}
-                        <div className="pt-4 pb-20 border-t border-emerald-100 flex gap-4">
-                            <input type="file" accept=".json" className="hidden" ref={fileInputRef} onChange={importData} />
-                            <button onClick={() => fileInputRef.current.click()} className="flex-1 bg-white border border-emerald-200 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:bg-emerald-50">Import JSON</button>
-                            <button onClick={exportData} className="flex-1 bg-white border border-emerald-200 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:bg-emerald-50">Export Backup</button>
-                        </div>
                     </main>
+
+                    <nav className="fixed bottom-0 left-0 right-0 glass-panel h-24 flex items-center justify-around px-8 z-[150]">
+                        <button onClick={() => setViewMode('timeline')} className={`w-12 h-12 rounded-2xl flex items-center justify-center ${viewMode === 'timeline' ? 'bg-emerald-900 text-white shadow-xl' : 'text-emerald-200'}`}><Icon name="layout-list" size={20} /></button>
+                        <div className="relative -mt-16">
+                            <button onClick={() => setIsEntryOpen(true)} className="w-20 h-20 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-2xl border-[6px] border-[#f8faf9] active:scale-95 transition-transform"><Icon name="plus" size={32} /></button>
+                        </div>
+                        <button onClick={() => setViewMode('calendar')} className={`w-12 h-12 rounded-2xl flex items-center justify-center ${viewMode === 'calendar' ? 'bg-emerald-900 text-white shadow-xl' : 'text-emerald-200'}`}><Icon name="calendar" size={20} /></button>
+                    </nav>
+
+                    {inspectDate && (
+                        <div className="fixed inset-0 z-[160] flex items-end bg-black/60" onClick={() => setInspectDate(null)}>
+                            <div className="bg-white w-full rounded-t-[3rem] p-8 max-h-[80vh] flex flex-col modal-animate" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <div>
+                                        <h3 className="font-black text-emerald-900 text-2xl italic">Records</h3>
+                                        <p className="text-[10px] font-black uppercase text-emerald-300">D-{getDayNumber(inspectDate)}</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => { setFormDate(inspectDate); setInspectDate(null); setIsEntryOpen(true); }} className="w-10 h-10 bg-emerald-600 text-white rounded-full flex items-center justify-center"><Icon name="plus" size={18} /></button>
+                                        <button onClick={() => setInspectDate(null)} className="w-10 h-10 bg-emerald-50 text-emerald-400 rounded-full flex items-center justify-center"><Icon name="x" size={18} /></button>
+                                    </div>
+                                </div>
+                                <div className="overflow-y-auto space-y-4 no-scrollbar pb-10">
+                                    {logs.filter(l => l.date === inspectDate).map(log => {
+                                        const cat = categories.find(c => c.name === log.category);
+                                        return (
+                                            <div key={log.id} className="p-6 bg-emerald-50/50 rounded-[2rem] border border-emerald-100/50">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <div className={`px-2 py-1 rounded text-[10px] font-black text-white ${cat?.color || 'bg-slate-400'}`}>{log.category}</div>
+                                                    <button onClick={() => { setInspectDate(null); openEdit(log); }} className="text-emerald-400"><Icon name="edit-2" size={14}/></button>
+                                                </div>
+                                                <p className="text-sm font-medium text-emerald-900 whitespace-pre-wrap">{log.content}</p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
