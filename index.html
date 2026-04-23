@@ -2,80 +2,148 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Life Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LifeTracker | codeguy0425</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.css" rel="stylesheet">
     <style>
-        .lucide { vertical-align: middle; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { -webkit-tap-highlight-color: transparent; }
     </style>
 </head>
-<body class="bg-slate-50">
+<body class="bg-[#f8fafc] text-slate-900 font-sans">
     <div id="root"></div>
+
     <script type="text/babel">
         const { useState, useEffect } = React;
 
         function App() {
+            // Persistence via LocalStorage
             const [logs, setLogs] = useState(() => {
-                const saved = localStorage.getItem('life-logs');
+                const saved = localStorage.getItem('lifetracker_db');
                 return saved ? JSON.parse(saved) : [];
             });
             const [text, setText] = useState("");
             const [category, setCategory] = useState("Note");
 
             useEffect(() => {
-                localStorage.setItem('life-logs', JSON.stringify(logs));
+                localStorage.setItem('lifetracker_db', JSON.stringify(logs));
             }, [logs]);
 
             const categories = [
-                { name: 'Note', color: 'bg-slate-500' },
-                { name: 'Meal', color: 'bg-orange-500' },
-                { name: 'Gym', color: 'bg-blue-600' },
-                { name: 'Hiking', color: 'bg-green-600' },
-                { name: 'PTCG', color: 'bg-red-500' }
+                { name: 'Note', color: 'bg-slate-500', icon: '📝' },
+                { name: 'Meal', color: 'bg-orange-500', icon: '🍲' },
+                { name: 'Gym', color: 'bg-blue-600', icon: '💪' },
+                { name: 'Hiking', color: 'bg-green-600', icon: '⛰️' },
+                { name: 'PTCG', color: 'bg-red-500', icon: '🃏' }
             ];
 
             const handleSave = () => {
-                if (!text) return;
-                const newLog = { id: Date.now(), category, content: text, date: new Date().toLocaleString() };
-                setLogs([newLog, ...logs]);
+                if (!text.trim()) return;
+                const newEntry = {
+                    id: Date.now(),
+                    category,
+                    content: text,
+                    date: new Date().toLocaleString('en-HK', { 
+                        month: 'short', 
+                        day: 'numeric', 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                    })
+                };
+                setLogs([newEntry, ...logs]);
                 setText("");
             };
 
+            const deleteLog = (id) => {
+                if(window.confirm("Delete this log?")) {
+                    setLogs(logs.filter(l => l.id !== id));
+                }
+            };
+
+            const exportData = () => {
+                const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `lifetracker_export_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+            };
+
             return (
-                <div className="max-w-2xl mx-auto p-4 font-sans">
-                    <header className="mb-6">
-                        <h1 className="text-2xl font-bold">Life Tracker</h1>
-                        <p className="text-slate-500 text-sm italic">Day 2: Fresh Start</p>
+                <div className="max-w-md mx-auto min-h-screen flex flex-col p-4 pb-10">
+                    <header className="flex justify-between items-center py-6">
+                        <div>
+                            <h1 className="text-3xl font-black tracking-tighter text-slate-900">LifeTracker</h1>
+                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">New Chapter • HK</p>
+                        </div>
+                        <button onClick={exportData} className="bg-white p-2 rounded-full shadow-sm border border-slate-200 active:scale-90 transition-transform">
+                            💾
+                        </button>
                     </header>
 
-                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
-                        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+                    {/* Input Module */}
+                    <div className="bg-white rounded-3xl p-5 shadow-xl shadow-slate-200/50 border border-slate-100 mb-8">
+                        <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar py-1">
                             {categories.map(cat => (
-                                <button key={cat.name} onClick={() => setCategory(cat.name)}
-                                    className={`px-3 py-1 rounded-full text-sm font-medium ${category === cat.name ? `${cat.color} text-white` : 'bg-slate-100 text-slate-600'}`}>
+                                <button 
+                                    key={cat.name} 
+                                    onClick={() => setCategory(cat.name)}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-sm font-bold whitespace-nowrap transition-all ${
+                                        category === cat.name 
+                                        ? `${cat.color} text-white shadow-lg scale-105` 
+                                        : 'bg-slate-50 text-slate-500 border border-slate-100'
+                                    }`}
+                                >
+                                    <span>{cat.icon}</span>
                                     {cat.name}
                                 </button>
                             ))}
                         </div>
-                        <textarea className="w-full p-3 border rounded-lg outline-none" rows="3" value={text} onChange={(e) => setText(e.target.value)} placeholder="What happened?" />
-                        <button onClick={handleSave} className="w-full mt-3 bg-slate-900 text-white py-2 rounded-lg font-bold">Save Entry</button>
+                        
+                        <textarea 
+                            className="w-full bg-slate-50 p-4 rounded-2xl text-slate-800 placeholder-slate-400 border-none focus:ring-2 focus:ring-slate-100 outline-none resize-none transition-all"
+                            placeholder={`Describe your ${category.toLowerCase()}...`}
+                            rows="4"
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                        />
+                        
+                        <button 
+                            onClick={handleSave}
+                            className="w-full mt-4 bg-slate-900 text-white py-4 rounded-2xl font-black text-lg active:scale-[0.98] transition-all shadow-lg shadow-slate-900/20"
+                        >
+                            Log Activity
+                        </button>
                     </div>
 
+                    {/* Feed Section */}
                     <div className="space-y-4">
+                        <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest px-2">Timeline</h2>
+                        {logs.length === 0 && (
+                            <div className="text-center py-20 bg-slate-100/50 rounded-3xl border-2 border-dashed border-slate-200">
+                                <p className="text-slate-400 font-medium italic text-sm">Waiting for your first entry...</p>
+                            </div>
+                        )}
                         {logs.map(log => (
-                            <div key={log.id} className="bg-white p-4 rounded-xl border border-slate-200 flex gap-4">
-                                <div className={`w-2 rounded-full ${categories.find(c => c.name === log.category)?.color}`} />
-                                <div className="flex-1">
-                                    <div className="flex justify-between text-xs font-bold text-slate-400 mb-1">
-                                        <span>{log.category}</span>
-                                        <span>{log.date}</span>
+                            <div key={log.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative group animate-in slide-in-from-bottom-4 duration-300">
+                                <div className="flex justify-between items-center mb-3">
+                                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black text-white ${categories.find(c => c.name === log.category)?.color}`}>
+                                        <span>{categories.find(c => c.name === log.category)?.icon}</span>
+                                        {log.category}
                                     </div>
-                                    <p className="text-slate-800">{log.content}</p>
+                                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">{log.date}</span>
                                 </div>
+                                <p className="text-slate-700 font-medium leading-relaxed whitespace-pre-wrap">{log.content}</p>
+                                <button 
+                                    onClick={() => deleteLog(log.id)}
+                                    className="absolute -top-2 -right-2 bg-white border border-slate-200 text-slate-300 hover:text-red-500 w-7 h-7 rounded-full shadow-sm flex items-center justify-center text-sm font-bold"
+                                >
+                                    ×
+                                </button>
                             </div>
                         ))}
                     </div>
