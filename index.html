@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Life Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.css" rel="stylesheet">
+    <style>
+        .lucide { vertical-align: middle; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [logs, setLogs] = useState(() => {
+                const saved = localStorage.getItem('life-logs');
+                return saved ? JSON.parse(saved) : [];
+            });
+            const [text, setText] = useState("");
+            const [category, setCategory] = useState("Note");
+
+            useEffect(() => {
+                localStorage.setItem('life-logs', JSON.stringify(logs));
+            }, [logs]);
+
+            const categories = [
+                { name: 'Note', color: 'bg-slate-500' },
+                { name: 'Meal', color: 'bg-orange-500' },
+                { name: 'Gym', color: 'bg-blue-600' },
+                { name: 'Hiking', color: 'bg-green-600' },
+                { name: 'PTCG', color: 'bg-red-500' }
+            ];
+
+            const handleSave = () => {
+                if (!text) return;
+                const newLog = { id: Date.now(), category, content: text, date: new Date().toLocaleString() };
+                setLogs([newLog, ...logs]);
+                setText("");
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto p-4 font-sans">
+                    <header className="mb-6">
+                        <h1 className="text-2xl font-bold">Life Tracker</h1>
+                        <p className="text-slate-500 text-sm italic">Day 2: Fresh Start</p>
+                    </header>
+
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
+                        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+                            {categories.map(cat => (
+                                <button key={cat.name} onClick={() => setCategory(cat.name)}
+                                    className={`px-3 py-1 rounded-full text-sm font-medium ${category === cat.name ? `${cat.color} text-white` : 'bg-slate-100 text-slate-600'}`}>
+                                    {cat.name}
+                                </button>
+                            ))}
+                        </div>
+                        <textarea className="w-full p-3 border rounded-lg outline-none" rows="3" value={text} onChange={(e) => setText(e.target.value)} placeholder="What happened?" />
+                        <button onClick={handleSave} className="w-full mt-3 bg-slate-900 text-white py-2 rounded-lg font-bold">Save Entry</button>
+                    </div>
+
+                    <div className="space-y-4">
+                        {logs.map(log => (
+                            <div key={log.id} className="bg-white p-4 rounded-xl border border-slate-200 flex gap-4">
+                                <div className={`w-2 rounded-full ${categories.find(c => c.name === log.category)?.color}`} />
+                                <div className="flex-1">
+                                    <div className="flex justify-between text-xs font-bold text-slate-400 mb-1">
+                                        <span>{log.category}</span>
+                                        <span>{log.date}</span>
+                                    </div>
+                                    <p className="text-slate-800">{log.content}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
