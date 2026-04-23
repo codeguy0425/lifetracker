@@ -75,7 +75,8 @@
         ];
 
         function App() {
-            // Helper to get local YYYY-MM-DD
+            const fileInputRef = useRef(null);
+            
             const toLocalISO = (date) => {
                 const offset = date.getTimezoneOffset();
                 const localDate = new Date(date.getTime() - (offset * 60 * 1000));
@@ -96,7 +97,6 @@
                 } catch (e) { return DEFAULT_CATEGORIES; }
             });
             
-            // Default to 'calendar' view
             const [viewMode, setViewMode] = useState('calendar');
             const [isEntryOpen, setIsOpen] = useState(false);
             const [isAddingCat, setIsAddingCat] = useState(false);
@@ -186,6 +186,24 @@
                 closeForm();
             };
 
+            const handleImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const data = JSON.parse(event.target.result);
+                        if (Array.isArray(data)) {
+                            setLogs(data);
+                        }
+                    } catch (err) {
+                        console.error("Invalid JSON format");
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = ''; // Reset input
+            };
+
             const addNewCategory = () => {
                 const name = newCatName.trim();
                 if (!name) return;
@@ -219,6 +237,14 @@
 
             return (
                 <div className="min-h-screen max-w-lg mx-auto pb-32">
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleImport} 
+                        accept=".json" 
+                        className="hidden" 
+                    />
+
                     {/* Delete Confirmation */}
                     {deleteConfirm && (
                         <div className="fixed inset-0 z-[300] flex items-center justify-center p-8 bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
@@ -277,11 +303,14 @@
                     <header className="px-6 pt-10 pb-6">
                         <div className="flex justify-between items-center mb-8">
                             <h1 className="text-3xl font-black text-emerald-900 tracking-tighter italic underline decoration-emerald-100">LOGS.</h1>
-                            <button onClick={() => {
-                                const blob = new Blob([JSON.stringify(logs, null, 2)], {type: 'application/json'});
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a'); a.href = url; a.download = 'life-tracker-backup.json'; a.click();
-                            }} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-400 border border-emerald-50 shadow-sm"><Icon name="download" size={18} /></button>
+                            <div className="flex gap-2">
+                                <button onClick={() => fileInputRef.current.click()} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-400 border border-emerald-50 shadow-sm"><Icon name="upload" size={18} /></button>
+                                <button onClick={() => {
+                                    const blob = new Blob([JSON.stringify(logs, null, 2)], {type: 'application/json'});
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a'); a.href = url; a.download = 'life-tracker-backup.json'; a.click();
+                                }} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-400 border border-emerald-50 shadow-sm"><Icon name="download" size={18} /></button>
+                            </div>
                         </div>
                         <div className="bg-emerald-600 p-8 rounded-[2.5rem] shadow-2xl shadow-emerald-200/50 text-white flex justify-between items-center relative overflow-hidden">
                             <div className="relative z-10">
@@ -368,14 +397,12 @@
 
                     {/* Navigation Bar */}
                     <nav className="fixed bottom-0 left-0 right-0 glass-panel h-24 flex items-center justify-around px-8 z-[150]">
-                        {/* Calendar View Button - Left */}
                         <button onClick={() => setViewMode('calendar')} className={`w-12 h-12 rounded-2xl flex items-center justify-center ${viewMode === 'calendar' ? 'bg-emerald-900 text-white shadow-xl' : 'text-emerald-200'}`}><Icon name="calendar" size={20} /></button>
                         
                         <div className="relative -mt-16">
                             <button onClick={() => { setFormDate(todayStr); setIsOpen(true); }} className="w-20 h-20 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-2xl border-[6px] border-[#f8faf9] active:scale-95 transition-transform"><Icon name="plus" size={32} /></button>
                         </div>
 
-                        {/* List View Button - Right */}
                         <button onClick={() => setViewMode('timeline')} className={`w-12 h-12 rounded-2xl flex items-center justify-center ${viewMode === 'timeline' ? 'bg-emerald-900 text-white shadow-xl' : 'text-emerald-200'}`}><Icon name="layout-list" size={20} /></button>
                     </nav>
 
