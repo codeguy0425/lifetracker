@@ -55,10 +55,11 @@ Write-Step "Packaging Lambda code"
 $tempZip = Join-Path $env:TEMP "LifeTrackerHandler_$(Get-Date -Format yyyyMMdd_HHmmss).zip"
 if (Test-Path $tempZip) { Remove-Item -Force $tempZip }
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::Open($tempZip, [System.IO.Compression.ZipArchiveMode]::Create)
-$null = [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $lambdaFile, "LifeTrackerHandler.py")
-$zip.Dispose()
+$tmpDir = Join-Path $env:TEMP "lambdazip_$(Get-Date -Format yyyyMMdd_HHmmss)"
+New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+Copy-Item $lambdaFile (Join-Path $tmpDir "LifeTrackerHandler.py")
+Compress-Archive -Path (Join-Path $tmpDir "LifeTrackerHandler.py") -DestinationPath $tempZip -Force
+Remove-Item -Recurse -Force $tmpDir
 
 Write-Success "Created $tempZip"
 
@@ -68,11 +69,12 @@ Write-Step "Updating Lambda function: $functionName"
 $updateResult = aws lambda update-function-code `
     --function-name $functionName `
     --zip-file "fileb://$tempZip" `
+    --publish `
     --output json 2>&1
 Check-Exit "lambda update-function-code"
 
 $parsed = $updateResult | ConvertFrom-Json
-$script:newVersion = $parsed.Version
+$script:newVersion = "v" + $parsed.Version
 Write-Success "Update submitted (version $($script:newVersion))"
 
 # ---- Poll for completion ----
