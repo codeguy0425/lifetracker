@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Deploy Life Tracker to production: git commit+push, S3 upload, CloudFront invalidation, backend tests.
+    Deploy Life Tracker to production: git commit+push, S3 upload, CloudFront invalidation, Lambda update, backend tests.
 .DESCRIPTION
     Automates the full deploy pipeline:
     1. Stage all changes and git commit with auto-generated message
     2. Push to GitHub (origin main)
     3. Upload index.html to S3
     4. Invalidate CloudFront cache
-    5. Run backend integration tests
+    5. Upload LifeTrackerHandler.py to Lambda
+    6. Run backend integration tests
 .EXAMPLE
     .\deploy.ps1
 .NOTES
@@ -22,6 +23,9 @@ $script:gitSkipped = $false
 $script:s3Result = $null
 $script:cfResult = $null
 $script:testResult = $null
+$script:lambdaVersion = $null
+$script:lambdaDir = Join-Path $PSScriptRoot "..\deploy-lambda"
+$script:lambdaScript = Join-Path $lambdaDir "deploy-lambda.ps1"
 
 function Write-Step($message) {
     Write-Host "`n==> $message" -ForegroundColor Cyan
@@ -123,7 +127,20 @@ $cfParsed = $cfOutput | ConvertFrom-Json
 $script:cfResult = $cfParsed.Invalidation.Id
 Write-Success "Invalidation created: $($script:cfResult)"
 
-# ---- 5. Backend tests ----
+# ---- 5. Lambda deploy ----
+if (Test-Path $lambdaScript) {
+    Write-Step "Deploying Lambda code"
+    & $lambdaScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Lambda deploy failed"
+        exit 1
+    }
+    $script:lambdaVersion = "updated"
+} else {
+    Write-Host "  (lambda deploy script not found, skipping)" -ForegroundColor Yellow
+}
+
+# ---- 6. Backend tests ----
 Write-Step "Running backend tests"
 $testDir = Join-Path $PSScriptRoot "..\life-tracker-backend-test"
 $testScript = Join-Path $testDir "test-backend.ps1"
@@ -146,6 +163,7 @@ if (-not $script:gitSkipped) {
 }
 Write-Host "  S3 upload: $($script:s3Result)" -ForegroundColor White
 Write-Host "  CF inval:  $($script:cfResult)" -ForegroundColor White
+Write-Host "  Lambda:    $($script:lambdaVersion)" -ForegroundColor White
 Write-Host "  Tests:     $($script:testResult)" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
