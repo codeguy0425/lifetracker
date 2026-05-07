@@ -57,8 +57,8 @@ if (Test-Path $tempZip) { Remove-Item -Force $tempZip }
 
 $tmpDir = Join-Path $env:TEMP "lambdazip_$(Get-Date -Format yyyyMMdd_HHmmss)"
 New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
-Copy-Item $lambdaFile (Join-Path $tmpDir "LifeTrackerHandler.py")
-Compress-Archive -Path (Join-Path $tmpDir "LifeTrackerHandler.py") -DestinationPath $tempZip -Force
+Copy-Item $lambdaFile (Join-Path $tmpDir "lambda_function.py")
+Compress-Archive -Path (Join-Path $tmpDir "lambda_function.py") -DestinationPath $tempZip -Force
 Remove-Item -Recurse -Force $tmpDir
 
 Write-Success "Created $tempZip"
