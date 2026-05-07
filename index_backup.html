@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Life Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8faf9;
+            color: #064e3b;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            overflow-x: hidden;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(16, 185, 129, 0.1);
+        }
+
+        @keyframes fadeInScale {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        
+        .cat-entry-animate { animation: fadeInScale 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        input, textarea, button {
+            font-size: 16px !important;
+        }
+
+        .icon-wrapper {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body class="safe-area-inset-bottom">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
+            return (
+                <span className={`icon-wrapper ${className}`} style={{ width: size, height: size, minWidth: size, minHeight: size }}>
+                    <i key={name} ref={iconRef} data-lucide={name} style={{ width: size, height: size }}></i>
+                </span>
+            );
+        };
+
+        const STORAGE_KEY = 'lifetracker-v4-data';
+        const CAT_STORAGE_KEY = 'lifetracker-v4-cats';
+        const DAY_ONE_STR = '2026-04-23';
+
+        const DEFAULT_CATEGORIES = [
+            { name: 'Todo', icon: 'check-square', color: 'bg-indigo-600', protected: true },
+            { name: 'Meal', icon: 'utensils', color: 'bg-orange-500', protected: true },
+            { name: 'Gym', icon: 'dumbbell', color: 'bg-emerald-600', protected: true },
+            { name: 'Hiking', icon: 'mountain', color: 'bg-green-700', protected: true },
+            { name: 'PTCG', icon: 'zap', color: 'bg-teal-500', protected: true },
+            { name: 'Note', icon: 'sticky-note', color: 'bg-slate-500', protected: true }
+        ];
+
+        const CAT_COLORS = [
+            'bg-emerald-600', 'bg-teal-600', 'bg-rose-500', 'bg-indigo-500', 
+            'bg-amber-500', 'bg-violet-500', 'bg-sky-500', 'bg-fuchsia-500'
+        ];
+
+        function App() {
+            const fileInputRef = useRef(null);
+            const scrollContainerRef = useRef(null);
+            const toLocalISO = (date) => {
+                const offset = date.getTimezoneOffset();
+                const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+                return localDate.toISOString().split('T')[0];
+            };
+
+            const [logs, setLogs] = useState(() => {
+                try {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    return saved ? JSON.parse(saved) : [];
+                } catch (e) { return []; }
+            });
+
+            const [categories, setCategories] = useState(() => {
+                try {
+                    const saved = localStorage.getItem(CAT_STORAGE_KEY);
+                    const parsed = saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+                    const baseNames = DEFAULT_CATEGORIES.map(c => c.name);
+                    const merged = [...DEFAULT_CATEGORIES];
+                    parsed.forEach(c => {
+                        if (!baseNames.includes(c.name)) merged.push({ ...c, protected: false });
+                    });
+                    return merged;
+                } catch (e) { return DEFAULT_CATEGORIES; }
+            });
+            
+            const [viewMode, setViewMode] = useState('calendar');
+            const [isEntryOpen, setIsOpen] = useState(false);
+            const [isManagingCats, setIsManagingCats] = useState(false);
+            const [filterCategory, setFilterCategory] = useState('All');
+            const [inspectDate, setInspectDate] = useState(null);
+            const [editingLog, setEditingLog] = useState(null);
+            const [formText, setFormText] = useState("");
+            const [formCategory, setFormCategory] = useState("Todo");
+            const todayStr = useMemo(() => toLocalISO(new Date()), []);
+            const [formDate, setFormDate] = useState(todayStr);
+            const [newCatName, setNewCatName] = useState("");
+            const [deleteConfirm, setDeleteConfirm] = useState(null);
+            const [catDeleteConfirm, setCatDeleteConfirm] = useState(null);
+
+            const [currentCalMonth, setCurrentCalMonth] = useState(new Date().getMonth());
+            const [currentCalYear, setCurrentCalYear] = useState(new Date().getFullYear());
+
+            useEffect(() => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+                localStorage.setItem(CAT_STORAGE_KEY, JSON.stringify(categories));
+            }, [logs, categories]);
+
+            const getDayNumber = (dateStr) => {
+                if(!dateStr) return 0;
+                const target = new Date(dateStr + 'T00:00:00');
+                const start = new Date(DAY_ONE_STR + 'T00:00:00');
+                const diff = Math.floor((target - start) / (1000 * 60 * 60 * 24)) + 1;
+                return diff;
+            };
+
+            const toggleComplete = (id) => {
+                setLogs(prev => prev.map(log => 
+                    (log.id === id && log.category === 'Todo') ? { ...log, completed: !log.completed } : log
+                ));
+            };
+
+            const groupedLogs = useMemo(() => {
+                let list = [...logs];
+                if (filterCategory !== 'All') list = list.filter(l => l.category === filterCategory);
+                const groups = {};
+                list.forEach(log => {
+                    if (!groups[log.date]) groups[log.date] = [];
+                    groups[log.date].push(log);
+                });
+                return Object.entries(groups).sort((a, b) => new Date(b[0] + 'T00:00:00') - new Date(a[0] + 'T00:00:00'));
+            }, [logs, filterCategory]);
+
+            const calendarDays = useMemo(() => {
+                const firstDayOfMonth = new Date(currentCalYear, currentCalMonth, 1);
+                const lastDayOfMonth = new Date(currentCalYear, currentCalMonth + 1, 0);
+                const days = [];
+                for (let i = 0; i < firstDayOfMonth.getDay(); i++) days.push(null);
+                for (let i = 1; i <= lastDayOfMonth.getDate(); i++) {
+                    const dStr = `${currentCalYear}-${String(currentCalMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+                    days.push({ day: i, dateStr: dStr, hasLogs: logs.some(l => l.date === dStr), isToday: dStr === todayStr });
+                }
+                return days;
+            }, [currentCalMonth, currentCalYear, logs, todayStr]);
+
+            const handleSave = () => {
+                if (!formText.trim()) return;
+                const newLog = {
+                    id: editingLog ? editingLog.id : Date.now(),
+                    content: formText, category: formCategory, date: formDate,
+                    dayNumber: getDayNumber(formDate),
+                    completed: editingLog ? (editingLog.completed || false) : false
+                };
+                setLogs(prev => editingLog ? prev.map(l => l.id === editingLog.id ? newLog : l) : [newLog, ...prev]);
+                closeForm();
+            };
+
+            const addNewCategory = () => {
+                const name = newCatName.trim();
+                if (!name) return;
+                const exists = categories.find(c => c.name.toLowerCase() === name.toLowerCase());
+                if (!exists) {
+                    const color = CAT_COLORS[categories.length % CAT_COLORS.length];
+                    setCategories(prev => [...prev, { name, icon: 'tag', color, protected: false }]);
+                }
+                
+                // Use a short delay for icon rendering and select the new category
+                setTimeout(() => {
+                    setFormCategory(name);
+                    setNewCatName("");
+                    setIsManagingCats(false);
+                    if (window.lucide) window.lucide.createIcons();
+                }, 150);
+            };
+
+            const closeForm = () => {
+                setIsOpen(false); setEditingLog(null); setFormText(""); setFormCategory("Todo"); setIsManagingCats(false);
+            };
+
+            const openEdit = (log) => {
+                setEditingLog(log); setFormText(log.content); setFormCategory(log.category); setFormDate(log.date); setIsOpen(true);
+            };
+
+            return (
+                <div className="min-h-screen max-w-lg mx-auto pb-32">
+                    <input type="file" ref={fileInputRef} onChange={(e) => {
+                        const file = e.target.files[0]; if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (event) => { try { const data = JSON.parse(event.target.result); if (Array.isArray(data)) setLogs(data); } catch (err) {} };
+                        reader.readAsText(file); e.target.value = '';
+                    }} accept=".json" className="hidden" />
+
+                    {/* Modals */}
+                    {deleteConfirm && (
+                        <div className="fixed inset-0 z-[400] flex items-center justify-center p-8 bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
+                            <div className="bg-white w-full rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-xl font-bold text-emerald-900 mb-6 text-center italic">Remove entry?</h3>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-4 bg-emerald-50 text-emerald-400 rounded-2xl flex items-center justify-center"><Icon name="x" size={24} /></button>
+                                    <button onClick={() => { setLogs(prev => prev.filter(l => l.id !== deleteConfirm)); setDeleteConfirm(null); }} className="flex-1 py-4 bg-red-500 text-white rounded-2xl flex items-center justify-center shadow-lg"><Icon name="trash-2" size={24} /></button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {catDeleteConfirm && (
+                        <div className="fixed inset-0 z-[400] flex items-center justify-center p-8 bg-black/50 backdrop-blur-sm" onClick={() => setCatDeleteConfirm(null)}>
+                            <div className="bg-white w-full rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-xl font-bold text-emerald-900 mb-2 text-center italic">Delete Category?</h3>
+                                <p className="text-center text-xs text-emerald-500 mb-6 font-black uppercase tracking-widest">"{catDeleteConfirm}"</p>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setCatDeleteConfirm(null)} className="flex-1 py-4 bg-emerald-50 text-emerald-400 rounded-2xl flex items-center justify-center"><Icon name="x" size={24} /></button>
+                                    <button onClick={() => { 
+                                        setCategories(prev => prev.filter(c => c.name !== catDeleteConfirm));
+                                        if (formCategory === catDeleteConfirm) setFormCategory('Todo');
+                                        setCatDeleteConfirm(null);
+                                    }} className="flex-1 py-4 bg-red-500 text-white rounded-2xl flex items-center justify-center shadow-lg"><Icon name="trash-2" size={24} /></button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Entry Form Modal */}
+                    <div className={`fixed inset-0 z-[200] bg-black/40 transition-opacity duration-300 ${isEntryOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closeForm}>
+                        <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-[2.5rem] p-6 pb-10 shadow-2xl transition-transform duration-300 transform ${isEntryOpen ? 'translate-y-0' : 'translate-y-full'}`} onClick={e => e.stopPropagation()}>
+                            <div className="w-12 h-1.5 bg-emerald-100 rounded-full mx-auto mb-6"></div>
+                            
+                            <div className="flex justify-between items-center mb-6 px-2">
+                                <h2 className="text-2xl font-black text-emerald-900 tracking-tight">{editingLog ? "Edit Record" : "New Record"}</h2>
+                                <button onClick={closeForm} className="w-10 h-10 flex items-center justify-center bg-emerald-50 text-emerald-500 rounded-full"><Icon name="x" size={24} /></button>
+                            </div>
+
+                            <div className="space-y-6 max-h-[70vh] overflow-y-auto no-scrollbar">
+                                <div className="flex gap-3">
+                                    <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="flex-[2] bg-emerald-50/50 p-4 rounded-2xl text-emerald-800 font-bold border-none outline-none" />
+                                    <div className="flex-1 flex items-center justify-center bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest tabular-nums">D-{getDayNumber(formDate)}</div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center px-1">
+                                        <label className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">Category</label>
+                                        <button 
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                setIsManagingCats(!isManagingCats);
+                                            }} 
+                                            className={`w-8 h-8 flex items-center justify-center rounded-full transition-all ${isManagingCats ? 'bg-emerald-900 text-white rotate-45' : 'bg-emerald-50 text-emerald-600'}`}
+                                        >
+                                            <Icon name="plus" size={16}/>
+                                        </button>
+                                    </div>
+
+                                    {/* New Category Entry Area - Fixed to prevent layout jumps */}
+                                    <div className={`transition-all duration-200 overflow-hidden ${isManagingCats ? 'max-h-24 opacity-100 mb-4' : 'max-h-0 opacity-0 mb-0'}`}>
+                                        <div className="bg-emerald-50 p-3 rounded-2xl flex gap-3 items-center border border-emerald-100 shadow-inner cat-entry-animate">
+                                            <input 
+                                                type="text" 
+                                                placeholder="New category name..." 
+                                                className="flex-1 bg-white p-3 rounded-xl text-sm outline-none border border-emerald-100" 
+                                                value={newCatName} 
+                                                onChange={(e) => setNewCatName(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        addNewCategory();
+                                                    }
+                                                }}
+                                            />
+                                            <button onClick={addNewCategory} className="w-10 h-10 bg-emerald-600 text-white rounded-xl flex items-center justify-center shadow-md active:scale-90 transition-transform">
+                                                <Icon name="check" size={18} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div ref={scrollContainerRef} className="flex gap-3 overflow-x-auto no-scrollbar pb-2 px-1 items-center min-h-[96px]">
+                                        {categories.map(cat => (
+                                            <div key={cat.name} className="relative flex-shrink-0">
+                                                <button 
+                                                    onClick={() => setFormCategory(cat.name)} 
+                                                    className={`flex flex-col items-center justify-center w-20 h-20 rounded-2xl transition-all ${formCategory === cat.name ? `${cat.color} text-white shadow-lg scale-105 ring-4 ring-emerald-50` : 'bg-emerald-50/50 text-emerald-400 border border-emerald-100/50'}`}
+                                                >
+                                                    <Icon name={cat.icon || 'tag'} size={20} className="mb-1" />
+                                                    <span className="text-[9px] font-bold uppercase truncate w-full px-1 text-center">{cat.name}</span>
+                                                </button>
+                                                {!cat.protected && (
+                                                    <button 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setCatDeleteConfirm(cat.name);
+                                                        }}
+                                                        className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white"
+                                                    >
+                                                        <Icon name="x" size={12} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <textarea value={formText} onChange={(e) => setFormText(e.target.value)} placeholder="What's happening?" className="w-full h-32 bg-emerald-50/30 border border-emerald-100 p-5 rounded-3xl outline-none resize-none text-emerald-950 font-medium" />
+                                <button onClick={handleSave} className="w-full bg-emerald-600 text-white py-5 rounded-3xl flex items-center justify-center shadow-xl active:scale-95 transition-transform mb-4"><Icon name="check" size={28} /></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <header className="px-6 pt-10 pb-6">
+                        <div className="flex justify-between items-center mb-8">
+                            <h1 className="text-3xl font-black text-emerald-900 tracking-tighter italic underline decoration-emerald-100">LOGS.</h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => fileInputRef.current.click()} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-400 border border-emerald-50 shadow-sm"><Icon name="upload" size={18} /></button>
+                                <button onClick={() => {
+                                    const blob = new Blob([JSON.stringify(logs, null, 2)], {type: 'application/json'});
+                                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'life-tracker-backup.json'; a.click();
+                                }} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-400 border border-emerald-50 shadow-sm"><Icon name="download" size={18} /></button>
+                            </div>
+                        </div>
+                        <div className="bg-emerald-600 p-8 rounded-[2.5rem] shadow-2xl shadow-emerald-200/50 text-white flex justify-between items-center relative overflow-hidden">
+                            <div className="relative z-10">
+                                <p className="text-[10px] font-black uppercase opacity-60 tracking-[0.2em] mb-1 italic">Total Days</p>
+                                <span className="text-6xl font-black tabular-nums tracking-tighter">{getDayNumber(todayStr)}</span>
+                            </div>
+                            <div className="w-16 h-16 bg-emerald-500/40 rounded-full flex items-center justify-center backdrop-blur-md relative z-10 border border-white/10"><Icon name="zap" size={28} /></div>
+                            <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-emerald-500 rounded-full blur-3xl opacity-40"></div>
+                        </div>
+                    </header>
+
+                    <div className="px-6 mb-4">
+                        <div className="flex gap-3 overflow-x-auto no-scrollbar py-2">
+                            <button onClick={() => setFilterCategory('All')} className={`w-12 h-12 min-w-[48px] rounded-full flex items-center justify-center transition-all border-2 ${filterCategory === 'All' ? 'bg-emerald-900 border-emerald-900 text-white shadow-lg' : 'bg-white border-emerald-50 text-emerald-300'}`}><Icon name="layers" size={18} /></button>
+                            {categories.map(cat => (
+                                <button key={cat.name} onClick={() => setFilterCategory(cat.name)} className={`w-12 h-12 min-w-[48px] rounded-full flex items-center justify-center transition-all border-2 ${filterCategory === cat.name ? 'bg-emerald-900 border-emerald-900 text-white shadow-lg' : 'bg-white border-emerald-50 text-emerald-300'}`}><Icon name={cat.icon || 'tag'} size={18} /></button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <main className="px-6 pb-20">
+                        {viewMode === 'timeline' ? (
+                            <div className="space-y-10">
+                                {groupedLogs.length > 0 ? groupedLogs.map(([date, items]) => (
+                                    <div key={date}>
+                                        <div className="flex items-center gap-4 mb-4">
+                                            <div className="bg-emerald-100/80 text-emerald-800 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest tabular-nums">
+                                                {new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                                            </div>
+                                            <div className="h-px bg-emerald-50 flex-1"></div>
+                                            <div className="text-[10px] font-black text-emerald-300 uppercase tracking-tighter italic">D-{getDayNumber(date)}</div>
+                                        </div>
+                                        <div className="space-y-4">
+                                            {items.map(log => {
+                                                const cat = categories.find(c => c.name === log.category);
+                                                return (
+                                                    <div key={log.id} className={`bg-white p-6 rounded-[2rem] shadow-sm border border-emerald-50/50 transition-opacity ${log.completed ? 'opacity-50' : 'opacity-100'}`}>
+                                                        <div className="flex justify-between items-center mb-3">
+                                                            <div className="flex items-center gap-3">
+                                                                {log.category === 'Todo' && (
+                                                                    <button onClick={() => toggleComplete(log.id)} className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${log.completed ? 'bg-indigo-600 text-white' : 'border-2 border-emerald-100 text-transparent'}`}>
+                                                                        <Icon name="check" size={12} />
+                                                                    </button>
+                                                                )}
+                                                                <div className={`flex items-center gap-2 px-3 py-1 rounded-lg text-white ${cat?.color || 'bg-slate-400'}`}>
+                                                                    <Icon name={cat?.icon || 'tag'} size={10} />
+                                                                    <span className="text-[9px] font-black uppercase">{log.category}</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex gap-4">
+                                                                <button onClick={() => openEdit(log)} className="text-emerald-400"><Icon name="edit-2" size={16} /></button>
+                                                                <button onClick={() => setDeleteConfirm(log.id)} className="text-emerald-100"><Icon name="trash-2" size={16} /></button>
+                                                            </div>
+                                                        </div>
+                                                        <p className={`text-emerald-950 font-medium leading-relaxed text-sm whitespace-pre-wrap transition-all ${log.completed ? 'line-through opacity-60' : ''}`}>{log.content}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )) : <div className="py-20 text-center opacity-30 italic font-bold">No entries found.</div>}
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-emerald-50">
+                                <div className="flex justify-between items-center mb-6">
+                                    <div className="flex gap-2">
+                                        <button onClick={() => { const d = new Date(currentCalYear, currentCalMonth - 1); setCurrentCalMonth(d.getMonth()); setCurrentCalYear(d.getFullYear()); }} className="p-2 text-emerald-400"><Icon name="chevron-left" size={20} /></button>
+                                        <button onClick={() => { const d = new Date(); setCurrentCalMonth(d.getMonth()); setCurrentCalYear(d.getFullYear()); }} className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest">Today</button>
+                                    </div>
+                                    <h3 className="font-black text-emerald-900 uppercase text-xs tracking-widest tabular-nums">{new Date(currentCalYear, currentCalMonth).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</h3>
+                                    <button onClick={() => { const d = new Date(currentCalYear, currentCalMonth + 1); setCurrentCalMonth(d.getMonth()); setCurrentCalYear(d.getFullYear()); }} className="p-2 text-emerald-400"><Icon name="chevron-right" size={20} /></button>
+                                </div>
+                                <div className="grid grid-cols-7 gap-y-3">
+                                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => <div key={d} className="text-center text-[10px] font-black text-emerald-200">{d}</div>)}
+                                    {calendarDays.map((dayObj, i) => dayObj ? (
+                                        <button key={dayObj.dateStr} onClick={() => setInspectDate(dayObj.dateStr)} className={`aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-black transition-all relative ${dayObj.isToday ? 'ring-2 ring-emerald-600 ring-offset-2' : ''} ${dayObj.hasLogs ? 'bg-emerald-600 text-white shadow-lg' : 'text-emerald-200 hover:bg-emerald-50/50'}`}>
+                                            {dayObj.day}
+                                        </button>
+                                    ) : <div key={`empty-${i}`}></div>)}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-0 left-0 right-0 glass-panel h-24 flex items-center justify-around px-8 z-[150]">
+                        <button onClick={() => setViewMode('calendar')} className={`w-12 h-12 rounded-2xl flex items-center justify-center ${viewMode === 'calendar' ? 'bg-emerald-900 text-white shadow-xl' : 'text-emerald-200'}`}><Icon name="calendar" size={20} /></button>
+                        <div className="relative -mt-16">
+                            <button onClick={() => { setFormDate(todayStr); setIsOpen(true); }} className="w-20 h-20 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-2xl border-[6px] border-[#f8faf9] active:scale-95 transition-transform"><Icon name="plus" size={32} /></button>
+                        </div>
+                        <button onClick={() => setViewMode('timeline')} className={`w-12 h-12 rounded-2xl flex items-center justify-center ${viewMode === 'timeline' ? 'bg-emerald-900 text-white shadow-xl' : 'text-emerald-200'}`}><Icon name="layout-list" size={20} /></button>
+                    </nav>
+
+                    {inspectDate && (
+                        <div className="fixed inset-0 z-[160] flex items-end bg-black/60" onClick={() => setInspectDate(null)}>
+                            <div className="bg-white w-full rounded-t-[3rem] p-8 max-h-[80vh] flex flex-col modal-animate" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <div>
+                                        <h3 className="font-black text-emerald-900 text-2xl italic">{new Date(inspectDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</h3>
+                                        <p className="text-[10px] font-black uppercase text-emerald-300 tracking-widest">D-{getDayNumber(inspectDate)}</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => { setFormDate(inspectDate); setInspectDate(null); setIsOpen(true); }} className="w-10 h-10 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-lg"><Icon name="plus" size={18} /></button>
+                                        <button onClick={() => setInspectDate(null)} className="w-10 h-10 bg-emerald-50 text-emerald-400 rounded-full flex items-center justify-center"><Icon name="x" size={18} /></button>
+                                    </div>
+                                </div>
+                                <div className="overflow-y-auto space-y-4 no-scrollbar pb-10">
+                                    {logs.filter(l => l.date === inspectDate).length > 0 ? (
+                                        logs.filter(l => l.date === inspectDate).map(log => {
+                                            const cat = categories.find(c => c.name === log.category);
+                                            return (
+                                                <div key={log.id} className={`p-6 bg-emerald-50/50 rounded-[2rem] border border-emerald-100/50 transition-opacity ${log.completed ? 'opacity-50' : 'opacity-100'}`}>
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <div className="flex items-center gap-3">
+                                                            {log.category === 'Todo' && (
+                                                                <button onClick={() => toggleComplete(log.id)} className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${log.completed ? 'bg-indigo-600 text-white' : 'border-2 border-emerald-200 text-transparent'}`}>
+                                                                    <Icon name="check" size={10} />
+                                                                </button>
+                                                            )}
+                                                            <div className={`px-2 py-1 rounded text-[10px] font-black text-white ${cat?.color || 'bg-slate-400'}`}>{log.category}</div>
+                                                        </div>
+                                                        <button onClick={() => { setInspectDate(null); openEdit(log); }} className="text-emerald-400"><Icon name="edit-2" size={14}/></button>
+                                                    </div>
+                                                    <p className={`text-sm font-medium text-emerald-900 whitespace-pre-wrap transition-all ${log.completed ? 'line-through opacity-60' : ''}`}>{log.content}</p>
+                                                </div>
+                                            );
+                                        })
+                                    ) : <div className="py-10 text-center opacity-20 italic font-bold">Nothing recorded.</div>}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
