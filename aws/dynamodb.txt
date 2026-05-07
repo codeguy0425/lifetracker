@@ -1,0 +1,8 @@
+Table: LifeTrackerLogs
+
+sample data
+
+id	category	completed	content	date	dayNumber
+1.77805E+12	Meal	FALSE	"breakfast: ??+ ?nlunch: n/a\ntea: RUD\ndinner: home chicken, jelly fish"	23/5/2026	31
+1.77805E+12	Note	FALSE	?恍?timer	23/4/2026	1
+

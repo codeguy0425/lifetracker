@@ -1,0 +1,22 @@
+Routes for LifeTrackerAPI
+
+Route details
+Delete
+Edit
+ANY /LifeTrackerHandler (ID: gmxqg7h)
+
+ARN
+arn:aws:apigateway:ap-east-1::/apis/m83ifb26g0/routes/gmxqg7h
+Authorization
+Authorizers protect your API against unauthorized requests. Routes with no authorization attached are open.
+No authorizer attached to this route.
+Attach authorization
+Integration
+The integration is the backend resource that this route calls when it receives a request.
+rwaxp65
+Configure
+
+
+sample curl test :
+curl -X GET https://m83ifb26g0.execute-api.ap-east-1.amazonaws.com/LifeTrackerHandler
+{"logs": [{"completed": false, "category": "Meal", "content": "breakfast: \u725b\u6252+ \u901a\nlunch: n/a\ntea: RUD\ndinner: home chicken, jelly fish", "date": "2026-05-23", "dayNumber": 31.0, "id": "1778050626087"}, {"completed": false, "category": "Note", "content": "\u706b\u934btimer", "date": "2026-04-23", "dayNumber": 1.0, "id": "1778050549051"}]}
